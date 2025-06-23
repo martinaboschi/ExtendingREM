@@ -1,0 +1,433 @@
+---
+title: "Computer Practical 2"
+author: "Wit, EC., Lomi, A., Lerner, J., Boschi, M. & Lembo, M."
+date: "2025-06-24"
+output: pdf_document
+subtitle: "Relational (Hyper) Event Model: Inference"
+header-includes:  
+- \usepackage{xcolor}  
+- \definecolor{persianred}{rgb}{0.8, 0.2, 0.2}
+- \definecolor{airforceblue}{rgb}{0.36, 0.54, 0.66}
+---
+
+```{r setup, include=FALSE}
+knitr::knit_hooks$set(purl = knitr::hook_purl)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Remark: Each CP begins by loading data from the previous CP, which is located in the corresponding `_OUTPUT_CP_x_` folder. To ensure this file runs smoothly, the contents of that folder should be copied to the `_INPUT_CP_y_` folder of the current CP.
+
+# Session 1: Preparatory Steps
+
+## 1.1.    Installing libraries
+
+```{r message=FALSE, warning=FALSE}
+if (!require("mgcv", quietly = TRUE)) {
+  install.packages("mgcv")
+  library("mgcv")
+} else {
+  if (!require("mgcViz", quietly = TRUE)) {
+    install.packages("mgcViz")
+    library("mgcViz")
+  } else {
+    if (!require("ggplot2", quietly = TRUE)) {
+      install.packages("ggplot2")
+      library("ggplot2")
+    } else {
+      if (!require("survival", quietly = TRUE)) {
+        install.packages("survival")
+        library("survival")
+      } else {
+        if (!require("RColorBrewer", quietly = TRUE)){
+          install.packages("RColorBrewer")
+        } else {
+          if (!require("dplyr", quietly = TRUE)){
+          install.packages("dplyr")
+          } else {
+            library("mgcv")
+            library("mgcViz")
+            library("ggplot2")
+            library("survival")
+            library("RColorBrewer")
+            library(dplyr)
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+## 1.2.    Loading Data
+
+During Computer Practical 1, you computed the necessary statistics to support the inference techniques that will be explored in this second practical. Upon inspecting the dataset, you may notice the presence of missing values (NA) in some columns.
+
+In particular, the `TARGET` column contains only missing values, while the `SOURCE` column includes multiple entries. This indicates that we are dealing with \textbf{undirected relational hyper-events}, where the sender set is a subset of the vertices in a relational hypergraph $V$, and the receiver set is empty.
+
+Additionally, the `EVENT_INTERVAL_ID` column does not hold interpretable values, as in this application we just know the order of events. The `IS_OBSERVED` column is used to distinguish between actual observed events and non-events (i.e., events that could have occurred but did not).
+
+```{r}
+data_original <- read.csv("_INPUT_CP_2_/jean_events_EVENTS.csv")
+```
+
+```{r}
+head(data_original)
+```
+
+In this application, the `num.actors` column is also unnecessary. This is because non-events have been sampled to match the cardinality of the observed events, meaning that the effect of event size cannot be meaningfully estimated.
+
+To simplify visualization, we proceed by removing all unnecessary columns from the dataset.
+
+```{r}
+data <- data_original[,setdiff(colnames(data_original), 
+                               c("TARGET", "TYPE", "EVENT_INTERVAL_ID", "EVENT", 
+                                 "INTEGER_TIME", "TIME_POINT", 
+                                 "TIME_UNIT", "num.actors"))]
+rm(data_original)
+head(data)
+```
+
+## 1. Which inference technique can we apply?
+
+During the theoretical session, we explored several inference techniques. However, \textbf{not all of them are applicable in this context} due to limitations that often arise in the available data.
+
+Firstly, \textcolor{persianred}{full-likelihood-based methods cannot be applied} because \textbf{we lack precise timestamp information}. The dataset only provides the ordinal ordering of events, not their exact timings.
+
+Secondly, consider a situation where you are not able to control the sampling of non-events—as was possible using `eventnet` in previous exercises — and are instead provided with a \textbf{pre-sampled dataset}. In this case, \textcolor{persianred}{you cannot construct a full risk set}, and must instead rely on case-control sampling techniques.
+
+### 1.1. Inspect the Data and the Risk Set 
+
+If you remember the computations you did in the Computer Practical 1, you can already guess the number of lines of the following datasets. 
+
+Just for the sake of clarity — since some confusion may arise — in this CP we use $m$ to denote the  number of sampled non-events, but theoretically it used to name size of the sampled risk set, including the event as well.
+
+```{r}
+m = 20
+```
+
+
+```{r}
+data_ev <- data %>% filter(IS_OBSERVED == 1)
+data_nv <- data %>% filter(IS_OBSERVED == 0)
+```
+
+```{r}
+nrow(data_ev)
+```
+
+```{r}
+nrow(data_nv)
+nrow(data_nv) == nrow(data_ev) * m
+```
+
+### 1.2. Data looks ready for... coxph or clogit!
+
+Even though we do not have access to the full risk set, we can still use the `coxph` function in R to fit our model. While this does not exactly replicate the coding that would be performed with full timing information and a complete risk set, it remains quite similar.
+
+```{r}
+coxph_fit <- coxph(Surv(time = rep(1,nrow(data)), 
+                        event = data$IS_OBSERVED) ~ 
+                         + diff.female
+                         # + female
+                         + individual.activity 
+                         + dyadic.activity 
+                         + closure
+                         + strata(EVENT_INTERVAL)
+                         , data = data)
+summary(coxph_fit)
+```
+
+When applied in this context, the `clogit` function internally calls the `coxph` routine. 
+
+```{r}
+clogit_fit <- clogit(IS_OBSERVED ~ 
+                         + diff.female
+                         # + female
+                         +  individual.activity 
+                         + dyadic.activity 
+                         + closure
+                         + strata(EVENT_INTERVAL)
+                         , data = data)
+summary(clogit_fit)
+```
+
+```{r}
+coefficients(coxph_fit)
+coefficients(clogit_fit)
+```
+
+\textcolor{airforceblue}{**MODEL INTERPRETATION**}
+
+We find a \textcolor{red}{positive effect of individual, dyadic}. This suggests that prior (co-)presence in previous chapters — whether alone or in pairs — increases the rate of participating in events. A negative effect for diff.female suggests a positive effect for gender homophily, favouring  co-appearence with other actors of the same gender. Closure is not significant, and, thus, should not be interpreted. 
+
+## 2. Let's play with... m!
+
+The goal is to investigate how the parameter estimates behave as a function of $m$. 
+To this end, we consider four different values of $m$: 1, 5, 10, and 15. These values correspond to the number of non-events sampled for each observed event. Note that we already have a dataset where $m = 20$, which will serve as a reference point for comparison.
+
+```{r}
+merge_id_cols <- c("EVENT_INTERVAL")
+# Consider 4 different values of m
+ms <- c(1, 5, 10, 15)
+```
+
+### 2.1. First, we need to create the data...
+
+To evaluate the effect of $m$, we can create multiple datasets by varying the number of non-events included per event. We first tag the `data_ev` and `data_nv` datasets with a `.row_type` column to distinguish events from non-events when merging.
+
+```{r}
+# Add a new column to label each row in 'data_ev' and 'data_nv' 
+# as event data and non-event data respectively
+data_ev_tagged <- data_ev %>%
+  mutate(.row_type = "ev")
+data_nv_tagged <- data_nv %>%
+  mutate(.row_type = "nv")
+head(data_ev_tagged)
+# head(data_nv_tagged)
+rm(data_ev)
+rm(data_nv)
+```
+
+For each value of `m` in `ms`, we group the non-event data (`data_nv`) by a set of identifier columns (`EVENT_INTERVAL`) and sample `m` rows per group. These sampled non-events are then combined with the corresponding events and stored in a list `dat_sampled`. 
+
+Each entry in the list corresponds to a different sampling size and is labeled accordingly. 
+
+```{r}
+# List to store the sampled datasets for each sampling size
+dat_sampled <- list()
+
+# Loop through each sampling size
+for (mm in ms){
+  
+  set.seed(mm) 
+
+  # Sample 'm' rows (if available) from each group in 'data_nv'
+  data_nv_m_sampled <- data_nv_tagged %>%
+    group_by(across(all_of(merge_id_cols))) %>%
+    slice_sample(n = mm, replace = FALSE) %>%
+    ungroup()
+
+  # Combine the event data and the sampled non-event data
+  dat_sampled_m <- bind_rows(data_ev_tagged, data_nv_m_sampled) %>%
+    
+    # Sort the combined data by the grouping columns and by row type 
+    # (ev first, then nv)
+    arrange(across(all_of(merge_id_cols)), .row_type)
+
+  # Store the resulting data frame in the list
+  dat_sampled[[match(mm, ms)]] <- dat_sampled_m
+}
+
+# Assign names to each list element
+names(dat_sampled) <- ms
+
+# Remove intermediate variables to clean up the workspace
+rm(data_nv_m_sampled, dat_sampled_m)
+```
+
+```{r}
+# let's check
+nrow(dat_sampled[[1]]) == nrow(data_ev_tagged)*(ms[1]+1)
+nrow(dat_sampled[[2]]) == nrow(data_ev_tagged)*(ms[2]+1)
+nrow(dat_sampled[[3]]) == nrow(data_ev_tagged)*(ms[3]+1)
+nrow(dat_sampled[[4]]) == nrow(data_ev_tagged)*(ms[4]+1)
+```
+To better understand the structure of the sampled datasets, we can inspect one of them. As shown below, each grouped instance includes exactly one observed event along with a set of randomly sampled non-events, based on the selected value of $m$. The structure of the data remains consistent with the original format, but is now restricted to a smaller, case-control-like risk set per event.
+
+```{r}
+head(dat_sampled[[2]], 10)
+```
+
+### 2.2. ... and then, we can fit the models!
+
+```{r}
+clogit_fits <- list()
+```
+
+```{r}
+for (mm in ms){
+  print(mm)
+  clogit_fits[[match(mm, ms)]] <- clogit(IS_OBSERVED ~ 
+                         + diff.female
+                         # + female
+                         + individual.activity 
+                         + dyadic.activity 
+                         + closure
+                         + strata(EVENT_INTERVAL)
+                         , data = dat_sampled[[match(mm, ms)]])
+}
+```
+
+```{r}
+# summary(clogit_fits[[1]])
+```
+
+```{r}
+summary(clogit_fits[[2]])
+```
+
+```{r}
+summary(clogit_fits[[3]])
+```
+
+```{r}
+summary(clogit_fits[[4]])
+```
+
+## 3. It's now time for m=1 using GAMs!
+
+### 3.1. Again, data first...
+
+As discussed in the theoretical session, when only one non-event is available per observed event ($m=1$), we can perform inference using a degenerate logistic regression. In this setup, all responses are set to 1, and the covariates are defined as the difference between the covariate values for the event and the corresponding non-event.
+
+We now proceed to construct a dataset formatted in this way, which will allow us to apply this degenerate logistic regression approach.
+
+```{r}
+set.seed(10)
+
+# For each group defined by the merge_id_cols, take one random non-event
+data_nv_1_sampled <- data_nv_tagged %>%
+  group_by(across(all_of(merge_id_cols))) %>%
+  slice_sample(n = 1) %>%
+  ungroup()
+
+# Perform a left join: 
+# for each row in data_ev, attach the corresponding non-event row (if available)
+# based on matching values in the merge_id_cols
+# The suffixes "_ev" and "_nv" will be added to columns from data_ev and data_nv 
+dat_gam_1 <- data_ev_tagged %>%
+  left_join(data_nv_1_sampled, 
+            by = merge_id_cols, suffix = c("_ev", "_nv"))
+
+# All responses are set equal to 1
+dat_gam_1$y <- 1
+
+rm(data_nv_1_sampled)
+```
+
+```{r}
+# covariates defined as difference between 
+# covariate values for event and corresponding non-event
+dat_gam_1$female <- 
+  dat_gam_1$female_ev - dat_gam_1$female_nv
+dat_gam_1$diff_female <- 
+  dat_gam_1$diff.female_ev - dat_gam_1$diff.female_nv
+dat_gam_1$individual_activity <- 
+  dat_gam_1$individual.activity_ev - dat_gam_1$individual.activity_nv
+dat_gam_1$dyadic_activity <- 
+  dat_gam_1$dyadic.activity_ev - dat_gam_1$dyadic.activity_nv
+dat_gam_1$closure <- 
+  dat_gam_1$closure_ev - dat_gam_1$closure_nv
+```
+
+### 3.2. ... and fitting then!
+
+```{r}
+gam_fit <- glm(y ~ 
+                + diff_female
+                # + female
+                + individual_activity 
+                + dyadic_activity 
+                + closure 
+                - 1 # no intercept
+               , data = dat_gam_1, 
+               family="binomial")
+summary(gam_fit)
+```
+
+\textcolor{airforceblue}{**MODEL INTERPRETATION**}
+
+Conclusion on the effect of individual and dyadic activity and gender homophily are as in the previously fitted model. Closure, on the other hand, appears significant and has a negative effect.This means that hyperevents with actors that have appeared with a common third-party in the past, are less likely.
+
+\textcolor{persianred}{SAVING MATERIALS FOR CP3!}:
+
+```{r}
+save(dat_gam_1, file="_OUTPUT_CP_2/dat_gam_1.RData")
+save(gam_fit, file="_OUTPUT_CP_2/gam_fit.RData")
+```
+
+### 3.3. We can still play with m...
+
+#### 3.3.1. Let's create the data we need
+
+```{r}
+# Store the case-control datasets for different m
+dat_gam <- list()
+
+# Loop through each sampling size defined in 'ms'
+for (mm in ms){
+  
+  set.seed(mm)
+
+  # Sample randomly 'm' rows from each group in 'data_nv'
+  data_nv_m_sampled <- data_nv_tagged %>%
+    group_by(across(all_of(merge_id_cols))) %>%
+    slice_sample(n = mm, replace = FALSE) %>%
+    ungroup()
+
+  # Left join the sampled non-event data to the event data using the merge keys
+  # this combines each row of event data with 'm' non-event rows (if available)
+  dat_gam_m <- data_ev_tagged %>%
+    left_join(data_nv_m_sampled, by = merge_id_cols, suffix = c("_ev", "_nv"))
+
+  # Compute covariate difference
+  dat_gam_m$female <- 
+    dat_gam_1$female_ev - dat_gam_1$female_nv
+  dat_gam_m$diff_female <- 
+    dat_gam_1$diff.female_ev - dat_gam_1$diff.female_nv
+  dat_gam_m$individual_activity <- 
+    dat_gam_m$individual.activity_ev - dat_gam_m$individual.activity_nv
+  dat_gam_m$dyadic_activity <- 
+    dat_gam_m$dyadic.activity_ev - dat_gam_m$dyadic.activity_nv
+  dat_gam_m$closure <- 
+    dat_gam_m$closure_ev - dat_gam_m$closure_nv
+  
+  # All responses are set equal to 1
+  dat_gam_m$y <- 1
+  
+  # Store the resulting data frame in the list
+  dat_gam[[match(mm, ms)]] <- dat_gam_m
+}
+
+# Assign names to each list element
+names(dat_gam) <- ms
+
+# Remove intermediate variables to clean up the workspace
+rm(data_nv_m_sampled, dat_gam_m)
+```
+
+#### 3.3.3. ... and fit the gam!
+
+```{r}
+glm_fits <- list()
+```
+
+```{r message=FALSE, warning=FALSE}
+for (mm in ms){
+  glm_fits[[match(mm, ms)]] <- glm(y ~ 
+                                    + diff_female
+                                    # + female
+                                    + individual_activity 
+                                    + dyadic_activity 
+                                    + closure 
+                                    - 1 ,# no intercept
+                         family = "binomial",
+                         data = dat_gam[[match(mm, ms)]])
+}
+```
+
+```{r}
+summary(glm_fits[[1]])
+```
+
+```{r}
+summary(glm_fits[[2]])
+```
+
+```{r}
+summary(glm_fits[[3]])
+```
+
+```{r}
+summary(glm_fits[[4]])
+```

@@ -1,0 +1,312 @@
+---
+title: "Computer Practical 4"
+author: "Wit, EC., Lomi, A., Lerner, J., Boschi, M. & Lembo, M."
+date: "2025-06-04"
+subtitle: "Goodness of Fit"
+output: pdf_document
+header-includes:  
+- \usepackage{xcolor}  
+- \definecolor{persianred}{rgb}{0.8, 0.2, 0.2}
+---
+
+```{r setup, include=FALSE}
+knitr::knit_hooks$set(purl = knitr::hook_purl)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Remark: Each CP begins by loading data from the previous CP, which is located in the corresponding `_OUTPUT_CP_x_` folder. To ensure this file runs smoothly, the contents of that folder should be copied to the `_INPUT_CP_y_` folder of the current CP.
+
+# Session 1: Preparatory Steps
+
+## 1.1.    Installing libraries
+
+```{r message=FALSE, warning=FALSE, show = FALSE}
+if (!require("mgcv", quietly = TRUE)) {
+  install.packages("mgcv")
+  library("mgcv")
+} else {
+  if (!require("mgcViz", quietly = TRUE)) {
+    install.packages("mgcViz")
+    library("mgcViz")
+  } else {
+    if (!require("ggplot2", quietly = TRUE)) {
+      install.packages("ggplot2")
+      library("ggplot2")
+    } else {
+      if (!require("survival", quietly = TRUE)) {
+        install.packages("survival")
+        library("survival")
+      } else {
+        if (!require("RColorBrewer", quietly = TRUE)){
+          install.packages("RColorBrewer")
+        } else {
+          if (!require("dplyr", quietly = TRUE)){
+          install.packages("dplyr")
+          } else {
+            library("mgcv")
+            library("mgcViz")
+            library("ggplot2")
+            library("survival")
+            library("RColorBrewer")
+            library(dplyr)
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Furthermore, we do require functions that allow us to perform GOF in practice. 
+They are contained in the following R file:
+
+```{r}
+source("_INPUT_CP_4_/_FUNCTIONS_.R")
+```
+
+
+## 1.2.    Loading Data
+
+This Computer Practical (CP) aims to assess the Goodness of Fit (GOF) for some of the models you fitted in previous CPs. We will focus on models fitted using one non-event per event. However, the method can be extended to situations where more than one non-event is used for each event. In such cases — as mentioned in Computer Practical 2 — it is necessary to adjust for the fact that the variance of the score no longer matches the expected value of the second derivative of the score.
+
+We import, for the previous CPs, five models, namely: 
+
+-   Linear Model from CP1:
+
+```{r}
+load("_INPUT_CP_4_/gam_fit.RData")
+load("_INPUT_CP_4_/dat_gam_1.RData")
+```
+
+```{r}
+class(gam_fit)
+summary(gam_fit)
+```
+
+```{r}
+gam_fit <- gam(formula = y ~ diff_female + individual_activity + dyadic_activity + closure - 
+    1, family = "binomial", data = dat_gam_1)
+summary(gam_fit)
+```
+
+-   Non-linear models from CP2: including time-varying effects, non-linear effects (with our without a log-transform of covariates), and random effects.
+
+```{r}
+load("_INPUT_CP_4_/nonlinear_models.RData")
+```
+
+We briefly inspect the data again:
+
+```{r}
+head(dat_gam_1)
+```
+
+and review the formulas of the fitted models to recap their differences and the regressors each model includes.
+
+```{r}
+gam_fit$formula
+```
+
+```{r}
+gam_fit_nle$formula
+gam_fit_nle_log$formula
+gam_fit_tve$formula
+gam_fit_re$formula
+```
+
+As discussed in the theoretical part, GOF tests rely on comparing the standardized score to Brownian Bridges.
+
+Since computing Brownian Bridges can be time-consuming for large dimensions, we have precomputed them and stored them in the corresponding object within the input file. Feel free to uncomment the code below if you would like to generate them yourself, or if you need to compute them in a different framework where other dimensions might be required.
+
+```{r}
+set.seed(1234)
+BB9 <- BB.single(dim.k = 9)
+BB10 <- BB.single(dim.k = 10)
+
+```
+
+# Session 2: Model Selection vs Goodness of Fit
+
+\textcolor{red}{An important point!}
+
+These models were constructed to illustrate the potential of non-linear modeling and to provide interpretations that help attendees understand why a linear model can be restrictive. However, this approach differs from the standard routine, where we would typically first compare competing models and then interpret only the best-fitting model, provided it also passes goodness-of-fit tests.
+
+```{r}
+# linear model 
+AIC(gam_fit)
+# model including time-varying effect for individual activity
+AIC(gam_fit_tve)
+# model including non-linear effect for individual activity
+AIC(gam_fit_nle) 
+# model including non-linear effect for log-individual activity
+AIC(gam_fit_nle_log) 
+# model including random effect for source actor
+AIC(gam_fit_re)
+```
+
+Let us consider the *linear model as the baseline*. Among the fitted models, the one *including a time-varying effect* for individual activity achieves the *lowest AIC*, indicating the best fit while maintaining a good balance between fit and complexity. The models incorporating a non-linear effect for individual activity or its logarithm perform only better than the linear model. The *worst-performing model* is the one *including a random effect* for the source actor, indicating that this addition increases complexity without providing a corresponding improvement in fit.
+
+Among this set of models, we would select the one *including a time-varying effect for individual activity*, as it provides the best balance between model fit and complexity.
+
+# Session 3: Goodness of Fit Evaluation 
+
+In the following, we will assess the goodness of fit for all five models. 
+
+## 3.1. Linear Model
+
+
+```{r}
+GOF_linear_DF = GOF_univariate(gam.fit = gam_fit, 
+                            index = 1)
+GOF_linear_DF[[1]]
+```
+
+```{r}
+GOF_linear_IA = GOF_univariate(gam.fit = gam_fit, 
+                            index = 2)
+GOF_linear_IA[[1]]
+```
+
+```{r}
+GOF_linear_DA = GOF_univariate(gam.fit = gam_fit, 
+                            index = 3)
+GOF_linear_DA[[1]]
+```
+
+```{r}
+GOF_linear_C = GOF_univariate(gam.fit = gam_fit, 
+                            index = 4)
+GOF_linear_C[[1]]
+```
+
+As you can see, the null hypothesis of model adequacy would not be rejected. However, based on model selection criteria, we would not have chosen this model as the best in terms of predictive performance.
+
+## 3.2. Models with non-linear effects for individual activity
+
+First of all, we need to identify what each column of the model matrix represents. We can do that by inspecting the coefficients of the fitted model.
+
+```{r}
+coefficients(gam_fit_nle)[1]
+coefficients(gam_fit_nle)[2]
+coefficients(gam_fit_nle)[3]
+coefficients(gam_fit_nle)[4:12]
+```
+
+```{r}
+GOF_nle_DF = GOF_univariate(gam.fit = gam_fit_nle, 
+                            index = 1)
+GOF_nle_DF[[1]]
+```
+
+```{r}
+GOF_nle_DA = GOF_univariate(gam.fit = gam_fit_nle, 
+                            index = 2)
+GOF_nle_DA[[1]]
+```
+
+```{r}
+GOF_nle_C = GOF_univariate(gam.fit = gam_fit_nle, 
+                            index = 3)
+GOF_nle_C[[1]]
+```
+
+```{r}
+GOF_nle_IA = GOF_multivariate(gam.fit = gam_fit_nle, 
+                  index = 4:12, BB.stat = BB9[[2]])
+GOF_nle_IA[[1]]
+```
+
+```{r}
+GOF_nle_log_DF = GOF_univariate(gam.fit = gam_fit_nle_log, 
+                            index = 1)
+GOF_nle_log_DF[[1]]
+```
+
+```{r}
+GOF_nle_log_DA = GOF_univariate(gam.fit = gam_fit_nle_log, 
+                            index = 2)
+GOF_nle_log_DA[[1]]
+```
+
+```{r}
+GOF_nle_log_C = GOF_univariate(gam.fit = gam_fit_nle_log, 
+                            index = 3)
+GOF_nle_log_C[[1]]
+```
+
+
+```{r}
+GOF_nle_log_IA = GOF_multivariate(gam.fit = gam_fit_nle_log, 
+                  index = 4:12, BB.stat = BB9[[2]])
+GOF_nle_log_IA[[1]]
+```
+
+Both non-linear effect of log-individual activity and non-linear effect of individual activity (without log transformation) are rejected.
+
+## 3.3. Models with time-varying effects for individual activity
+
+This is the model we would be asked to interpret based on the earlier model selection. All included effects are deemed adequate.
+
+```{r}
+coefficients(gam_fit_tve)[1]
+coefficients(gam_fit_tve)[2]
+coefficients(gam_fit_tve)[3]
+coefficients(gam_fit_tve)[4:13]
+```
+
+```{r}
+GOF_tve_DF = GOF_univariate(gam.fit = gam_fit_tve, 
+                            index = 1)
+GOF_tve_DF[[1]]
+```
+
+```{r}
+GOF_tve_DA = GOF_univariate(gam.fit = gam_fit_tve, 
+                            index = 2)
+GOF_tve_DA[[1]]
+```
+
+```{r}
+GOF_tve_C = GOF_univariate(gam.fit = gam_fit_tve, 
+                            index = 3)
+GOF_tve_C[[1]]
+```
+
+```{r}
+GOF_tve_IA = GOF_multivariate(gam.fit = gam_fit_tve, 
+                  index = 4:13, BB.stat = BB10[[2]])
+GOF_tve_IA[[1]]
+```
+
+We also include a graphical representation of the Martingale process:  
+
+```{r}
+plot(
+  dat_gam_1$EVENT_INTERVAL,
+  apply(GOF_tve_IA[[2]], 1, function(x) crossprod(x,x)),
+  type="l", 
+  lwd=2,
+  col="black", 
+  xlab="Time Points", 
+  ylab="Squared Norm of the Martingale-Residual Process", 
+  main="Goodness of Fit of Individual Activity with TVE",
+  ylim=c(0,max(BB10[[1]]))
+)
+for (iter in 1:100){
+  lines(
+    dat_gam_1$EVENT_INTERVAL,
+    BB10[[1]][seq(1, 2000, 
+                  length.out=length(dat_gam_1$EVENT_INTERVAL)),iter], 
+    col="darkgray", lwd=1, 
+    lty=3)
+}
+lines(
+  dat_gam_1$EVENT_INTERVAL,
+  apply(GOF_tve_IA[[2]], 1, function(x) crossprod(x,x)),
+  lwd=2,
+  ylim= c(0,10), 
+  col="black")
+legend("topright",c("Observed", "BBridge"),
+       lty = c(1,3),lwd = c(2,1), col = c("black","darkgray"))
+```
+
